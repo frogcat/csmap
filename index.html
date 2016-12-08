@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
+  <title>CSMap</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.0.2/dist/leaflet.css" />
+  <script src="https://unpkg.com/babel-polyfill@6.16.0/dist/polyfill.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.0.2/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
+  <script src="https://frogcat.github.io/leaflet-control-swipe/leaflet-control-swipe.js"></script>
+  <script src="leaflet-demlayer.js"></script>
+</head>
+
+<body>
+  <div id="map" style="position:absolute;top:0;left:0;right:0;bottom:0;"></div>
+  <script>
+    var map = L.map("map", L.extend({
+      minZoom: 0,
+      maxZoom: 16,
+      zoom: 8,
+      center: [35.658342, 139.701462]
+    }, L.Hash.parseHash(location.hash)));
+    L.hash(map);
+
+    var tmpl = "https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.{suffix}";
+    L.control.layers({
+      "標準地図": L.tileLayer(tmpl, {
+        id: "std",
+        suffix: "png"
+      }).addTo(map),
+      "写真": L.tileLayer(tmpl, {
+        id: "ort",
+        suffix: "jpg"
+      }),
+      "色別標高図": L.tileLayer(tmpl, {
+        id: "relief",
+        suffix: "png"
+      }),
+      "土地利用図": L.tileLayer(tmpl, {
+        id: "lum200k",
+        suffix: "png",
+        minZoom: 11,
+        maxNativeZoom: 14
+      })
+    }).addTo(map);
+
+    map.attributionControl.addAttribution("<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>");
+    map.attributionControl.addAttribution("<a href='https://github.com/frogcat/csmap'>fork me on GitHub</a>");
+
+    L.control.scale({
+      imperial: false
+    }).addTo(map);
+
+    L.demLayer({
+      pane: "swipePane"
+    }).addTo(map);
+
+    L.control.swipe().addTo(map);
+  </script>
+</body>
+
+</html>

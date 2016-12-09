@@ -24,11 +24,31 @@
   };
   var draw = function(img, dem) {
     for (var i = 0; i <= 0xffff; i++) {
-      var c = slope(dem, i) / 0xff;
-      img.data[i * 4 + 0] = 0xff + (0xcc - 0xff) * c;
-      img.data[i * 4 + 1] = 0xff + (0x33 - 0xff) * c;
-      img.data[i * 4 + 2] = 0xff + (0x00 - 0xff) * c;
-      img.data[i * 4 + 3] = 0x7f;
+      var c = slope(dem, i);
+
+      /*
+              var t = c / 0xff;
+              img.data[i * 4 + 0] = 0xff + (0xcc - 0xff) * t;
+              img.data[i * 4 + 1] = 0xff + (0x33 - 0xff) * t;
+              img.data[i * 4 + 2] = 0xff + (0x00 - 0xff) * t;
+              img.data[i * 4 + 3] = 0xff;
+      */
+
+
+
+      if (c < 0xa0) {
+        var t = c / 0xa0;
+        img.data[i * 4 + 0] = 0xff + (0xff - 0xff) * t;
+        img.data[i * 4 + 1] = 0xff + (0x33 - 0xff) * t;
+        img.data[i * 4 + 2] = 0xff + (0x00 - 0xff) * t;
+        img.data[i * 4 + 3] = 0xff;
+      } else {
+        var t = (c - 0xa0) / (0xff - 0xa0);
+        img.data[i * 4 + 0] = 0xff + (0x33 - 0xff) * t;
+        img.data[i * 4 + 1] = 0x33 + (0x00 - 0x33) * t;
+        img.data[i * 4 + 2] = 0x00 + (0x00 - 0x00) * t;
+        img.data[i * 4 + 3] = 0xff;
+      }
     }
   };
 

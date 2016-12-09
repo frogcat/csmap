@@ -6,11 +6,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
   <title>CSMap</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.0.2/dist/leaflet.css" />
-  <script src="https://unpkg.com/babel-polyfill@6.16.0/dist/polyfill.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.0.2/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
   <script src="https://frogcat.github.io/leaflet-control-swipe/leaflet-control-swipe.js"></script>
-  <script src="leaflet-demlayer.js"></script>
+  <script src="dem-slope-layer.js"></script>
+  <script src="dem-curvature-layer.js"></script>
 </head>
 
 <body>
@@ -53,7 +53,11 @@
       imperial: false
     }).addTo(map);
 
-    L.demLayer({
+    L.demCurvatureLayer({
+      pane: "swipePane"
+    }).addTo(map);
+
+    L.demSlopeLayer({
       pane: "swipePane"
     }).addTo(map);
 

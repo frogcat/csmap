@@ -52,7 +52,7 @@
     }
   };
 
-  var tmpl = "https://cyberjapandata.gsi.go.jp/xyz/dem/{z}/{x}/{y}.txt";
+  var tmpl = "https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.txt";
 
   var DEMSlopeLayer = L.GridLayer.extend({
     getTileSize: function() {
@@ -72,6 +72,7 @@
       }
 
       var unit = 10 * Math.pow(2, 14 - coords.z);
+      coords.id = coords.z <= 8 ? "demgm" : "dem";
 
       fetch(L.Util.template(tmpl, coords)).then(function(a) {
         return a.text();

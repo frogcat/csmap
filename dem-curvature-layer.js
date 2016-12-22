@@ -40,10 +40,11 @@
   };
 
   var load = function(coords, dx, dy) {
-    return fetch(L.Util.template("https://cyberjapandata.gsi.go.jp/xyz/dem/{z}/{x}/{y}.txt", {
+    return fetch(L.Util.template("https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.txt", {
       x: coords.x + dx,
       y: coords.y + dy,
-      z: coords.z
+      z: coords.z,
+      id: coords.z <= 8 ? 'demgm' : 'dem'
     })).then(function(a) {
       return a.text();
     }).then(function(txt) {

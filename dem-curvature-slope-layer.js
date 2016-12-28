@@ -104,7 +104,7 @@
   var DEMCurvatureSlopeLayer = L.GridLayer.extend({
     options: {
       updateWhenZooming: false,
-      opacity: 1.0
+      opacity: 0.8
     },
     getTileSize: function() {
       var a = 256 << Math.max(0, this._tileZoom - 14);

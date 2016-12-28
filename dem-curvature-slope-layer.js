@@ -14,6 +14,7 @@
         Loader.cache[url] = new Promise(function(resolve, reject) {
           var xhr = new XMLHttpRequest();
           xhr.onload = function() {
+            delete Loader.cache[url];
             var unit = 10 * Math.pow(2, 14 - coords.z);
             resolve(xhr.responseText.split(/[\n,]/).map(function(t) {
               return parseFloat(t) / unit;

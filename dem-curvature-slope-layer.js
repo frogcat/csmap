@@ -2,7 +2,19 @@
 
   var Loader = {
     cache: {},
+    xhrs: {},
+    zoom: NaN,
     load: function(coords, dx, dy) {
+      if (Loader.zoom !== coords.z) {
+        for (var key in Loader.xhrs) {
+          try {
+            Loader.xhrs[key].abort();
+          } catch (e) {}
+        }
+        Loader.xhrs = {};
+        Loader.cache = {};
+        Loader.zoom = coords.z;
+      }
       var url = L.Util.template("https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.txt", {
         x: coords.x + dx,
         y: coords.y + dy,
@@ -13,17 +25,15 @@
       if (!Loader.cache[url]) {
         Loader.cache[url] = new Promise(function(resolve, reject) {
           var xhr = new XMLHttpRequest();
-          xhr.onload = function() {
+          Loader.xhrs[url] = xhr;
+          xhr.onloadend = function(event) {
+            delete Loader.xhrs[url];
             delete Loader.cache[url];
-            var unit = 10 * Math.pow(2, 14 - coords.z);
-            resolve(xhr.responseText.split(/[\n,]/).map(function(t) {
-              return parseFloat(t) / unit;
+            resolve(xhr.status !== 200 ? null : xhr.responseText.split(/[\n,]/).map(function(t) {
+              return parseFloat(t);
             }));
           };
-          xhr.onerror = function() {
-            resolve(null);
-          };
-          xhr.open('GET', url);
+          xhr.open("GET", url);
           xhr.send();
         });
       }
@@ -52,7 +62,7 @@
     return a ? a[(((y + 0x100) & 0xff) << 8) + ((x + 0x100) & 0xff)] : NaN;
   };
 
-  var calc = function(dems, x, y) {
+  var calc = function(dems, x, y, unit) {
     var nw = elev(dems, x - 1, y - 1);
     var n = elev(dems, x, y - 1);
     var ne = elev(dems, x + 1, y - 1);
@@ -66,6 +76,11 @@
     var curvature = c * 4 - (n + w + s + e);
     var sx = (ne + e * 2 + se) - (nw + w * 2 + sw);
     var sy = (nw + n * 2 + ne) - (sw + s * 2 + se);
+
+    curvature /= unit;
+    sx /= unit;
+    sy /= unit;
+
     var slope = sx * sx + sy * sy;
 
     if (isNaN(curvature) || isNaN(slope))
@@ -91,9 +106,9 @@
     return [0, 0, 0, 0x7f];
   };
 
-  var draw = function(dems, data) {
+  var draw = function(dems, data, unit) {
     for (var i = 0xffff; i >= 0; i--) {
-      var a = calc(dems, i & 0xff, i >> 8);
+      var a = calc(dems, i & 0xff, i >> 8, unit);
       var j = i << 2;
       data[j + 0] = a[0];
       data[j + 1] = a[1];
@@ -105,6 +120,7 @@
   var DEMCurvatureSlopeLayer = L.GridLayer.extend({
     options: {
       updateWhenZooming: false,
+      updateWhenIdle: false,
       opacity: 0.8
     },
     getTileSize: function() {
@@ -112,6 +128,7 @@
       return L.point(a, a);
     },
     createTile: function(coords, done) {
+
       var div = L.DomUtil.create("div", "leaflet-tile");
       var cvs = div.appendChild(document.createElement("canvas"));
       cvs.width = 256;
@@ -133,9 +150,10 @@
         Loader.load(coords, 0, 1),
         Loader.load(coords, 1, 1)
       ]).then(function(dems) {
+        var unit = 10 * Math.pow(2, 14 - coords.z);
         var ctx = cvs.getContext("2d");
         var img = ctx.createImageData(cvs.width, cvs.height);
-        draw(dems, img.data);
+        draw(dems, img.data, unit);
         ctx.putImageData(img, 0, 0);
         if (done) done(null, div);
       });

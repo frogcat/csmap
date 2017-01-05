@@ -1,8 +1,9 @@
 (function() {
 
   var Loader = {
-    cache: {},
     xhrs: {},
+    promises: {},
+    dems: {},
     zoom: NaN,
     load: function(coords, dx, dy) {
       if (Loader.zoom !== coords.z) {
@@ -12,7 +13,8 @@
           } catch (e) {}
         }
         Loader.xhrs = {};
-        Loader.cache = {};
+        Loader.promises = {};
+        Loader.dems = {};
         Loader.zoom = coords.z;
       }
       var url = L.Util.template("https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.txt", {
@@ -21,23 +23,25 @@
         z: coords.z,
         id: coords.z <= 8 ? "demgm" : "dem"
       });
+      if (Loader.dems.hasOwnProperty(url))
+        return Loader.dems[url];
+      if (Loader.promises.hasOwnProperty(url))
+        return Loader.promises[url];
 
-      if (!Loader.cache[url]) {
-        Loader.cache[url] = new Promise(function(resolve, reject) {
-          var xhr = new XMLHttpRequest();
-          Loader.xhrs[url] = xhr;
-          xhr.onloadend = function(event) {
-            delete Loader.xhrs[url];
-            delete Loader.cache[url];
-            resolve(xhr.status !== 200 ? null : xhr.responseText.split(/[\n,]/).map(function(t) {
+      return Loader.promises[url] = new Promise(function(resolve, reject) {
+        var xhr = Loader.xhrs[url] = new XMLHttpRequest();
+        xhr.onloadend = function(event) {
+          delete Loader.xhrs[url];
+          delete Loader.promises[url];
+          resolve(Loader.dems[url] = xhr.status !== 200 ?
+            null :
+            xhr.responseText.split(/[\n,]/).map(function(t) {
               return parseFloat(t);
             }));
-          };
-          xhr.open("GET", url);
-          xhr.send();
-        });
-      }
-      return Loader.cache[url];
+        };
+        xhr.open("GET", url);
+        xhr.send();
+      });
     }
   };
 

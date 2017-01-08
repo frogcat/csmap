@@ -53,8 +53,19 @@
       imperial: false
     }).addTo(map);
 
-    L.demCurvatureSlopeLayer({
-      pane: "swipePane"
+    L.demCurvatureSlopeLayer("https://cyberjapandata.gsi.go.jp/xyz/dem/{z}/{x}/{y}.txt", {
+      pane: "swipePane",
+      minZoom: 9,
+      maxZoom: 18,
+      maxNativeZoom: 14,
+      opacity: 1.0
+    }).addTo(map);
+
+    L.demCurvatureSlopeLayer("https://cyberjapandata.gsi.go.jp/xyz/demgm/{z}/{x}/{y}.txt", {
+      pane: "swipePane",
+      minZoom: 0,
+      maxZoom: 8,
+      opacity: 0.5
     }).addTo(map);
 
     L.control.swipe().addTo(map);

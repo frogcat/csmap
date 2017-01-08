@@ -1,50 +1,5 @@
 (function() {
 
-  var Loader = {
-    xhrs: {},
-    promises: {},
-    dems: {},
-    zoom: NaN,
-    load: function(coords, dx, dy) {
-      if (Loader.zoom !== coords.z) {
-        for (var key in Loader.xhrs) {
-          try {
-            Loader.xhrs[key].abort();
-          } catch (e) {}
-        }
-        Loader.xhrs = {};
-        Loader.promises = {};
-        Loader.dems = {};
-        Loader.zoom = coords.z;
-      }
-      var url = L.Util.template("https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.txt", {
-        x: coords.x + dx,
-        y: coords.y + dy,
-        z: coords.z,
-        id: coords.z <= 8 ? "demgm" : "dem"
-      });
-      if (Loader.dems.hasOwnProperty(url))
-        return Loader.dems[url];
-      if (Loader.promises.hasOwnProperty(url))
-        return Loader.promises[url];
-
-      return Loader.promises[url] = new Promise(function(resolve, reject) {
-        var xhr = Loader.xhrs[url] = new XMLHttpRequest();
-        xhr.onloadend = function(event) {
-          delete Loader.xhrs[url];
-          delete Loader.promises[url];
-          resolve(Loader.dems[url] = xhr.status !== 200 ?
-            null :
-            xhr.responseText.split(/[\n,]/).map(function(t) {
-              return parseFloat(t);
-            }));
-        };
-        xhr.open("GET", url);
-        xhr.send();
-      });
-    }
-  };
-
   var red = [];
   for (var i = 0x7f; i >= 0; i--)
     red.push([0x7f, i, i, 0xff]);
@@ -124,36 +79,77 @@
   var DEMCurvatureSlopeLayer = L.GridLayer.extend({
     options: {
       updateWhenZooming: false,
-      updateWhenIdle: false,
-      opacity: 0.8
+      updateWhenIdle: false
+    },
+    initialize: function(url, options) {
+      this._url = url;
+      this._cache = {};
+      L.setOptions(this, options);
+    },
+    getEvents: function() {
+      var events = L.GridLayer.prototype.getEvents.call(this);
+      events.zoomstart = this._abort;
+      return events;
+    },
+    _abort: function(e) {
+      var cache = this._cache;
+      Object.keys(cache).forEach(function(key) {
+        try {
+          if (cache[key].xhr) cache[key].xhr.abort();
+        } catch (e) {}
+      });
+      this._cache = {};
+    },
+    _load: function(url) {
+      var cache = this._cache;
+      if (cache.hasOwnProperty(url))
+        return cache[url];
+      var xhr = new XMLHttpRequest();
+      var promise = cache[url] = new Promise(function(resolve) {
+        xhr.onloadend = function() {
+          resolve(cache[url] = xhr.status !== 200 ?
+            null :
+            xhr.responseText.split(/[\n,]/).map(function(t) {
+              return parseFloat(t);
+            }));
+        };
+        xhr.open("GET", url);
+        xhr.send();
+      });
+      promise.xhr = xhr;
+      return promise;
     },
     getTileSize: function() {
-      var a = 256 << Math.max(0, this._tileZoom - 14);
-      return L.point(a, a);
+      var a = (this._tileZoom - this.options.maxNativeZoom);
+      var p = L.point(this.options.tileSize, this.options.tileSize);
+      return (!isNaN(a) && a > 0 ? p.multiplyBy(1 << a) : p);
     },
     createTile: function(coords, done) {
-
+      var opt = this.options;
       var div = L.DomUtil.create("div", "leaflet-tile");
       var cvs = div.appendChild(document.createElement("canvas"));
-      cvs.width = 256;
-      cvs.height = 256;
-      if (coords.z > 14) {
+      cvs.width = opt.tileSize;
+      cvs.height = opt.tileSize;
+
+      var dz = coords.z - opt.maxNativeZoom;
+      if (!isNaN(dz) && dz > 0) {
         cvs.style.transformOrigin = "0 0";
-        cvs.style.transform = "scale(" + Math.pow(2, coords.z - 14) + ")";
-        coords.z = 14;
+        cvs.style.transform = "scale(" + (1 << dz) + ")";
+        coords.z = opt.maxNativeZoom;
       }
 
-      Promise.all([
-        Loader.load(coords, -1, -1),
-        Loader.load(coords, 0, -1),
-        Loader.load(coords, 1, -1),
-        Loader.load(coords, -1, 0),
-        Loader.load(coords, 0, 0),
-        Loader.load(coords, 1, 0),
-        Loader.load(coords, -1, 1),
-        Loader.load(coords, 0, 1),
-        Loader.load(coords, 1, 1)
-      ]).then(function(dems) {
+      var promises = [];
+      for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+          promises.push(this._load(L.Util.template(this._url, {
+            z: coords.z,
+            x: coords.x + dx,
+            y: coords.y + dy
+          })));
+        }
+      }
+
+      Promise.all(promises).then(function(dems) {
         var unit = 10 * Math.pow(2, 14 - coords.z);
         var ctx = cvs.getContext("2d");
         var img = ctx.createImageData(cvs.width, cvs.height);
@@ -165,8 +161,8 @@
     }
   });
 
-  L.demCurvatureSlopeLayer = function(options) {
-    return new DEMCurvatureSlopeLayer(options);
+  L.demCurvatureSlopeLayer = function(url, options) {
+    return new DEMCurvatureSlopeLayer(url, options);
   };
 
 })();

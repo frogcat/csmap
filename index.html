@@ -18,34 +18,25 @@
 <body>
   <div id="map" style="position:absolute;top:0;left:0;right:0;bottom:0;"></div>
   <script>
-    var pallet = new Uint32Array(0x200);
-    for (var i = 0; i < 0x100; i++) pallet[i] = ((0xff - i) << 24) + 0x800020;
-    for (var i = 0; i < 0x100; i++) pallet[i + 0x100] = (i << 24) + 0x00a5ff;
+    var pallet = new Uint32Array(0x100);
+    for (var i = 0; i < 0x100; i++)
+      pallet[i] = i < 0x80 ? 0xff800020 - 0x02000000 * i : 0x00a5ff + 0x02000000 * (i - 0x80);
 
-    function transform(data, unit) {
-      var writer = new Uint32Array(data.buffer);
-      var z = new Float32Array(0x10000);
-      for (var i = 0; i < 0x10000; i++) {
+    function transform(data, zoom) {
+      var z = function(i) {
         var h = (data[i * 4 + 0] << 16) + (data[i * 4 + 1] << 8) + data[i * 4 + 2];
-        z[i] = h === 0x800000 ? NaN : (h > 0x800000 ? h - 0x1000000 : h) / 100 / unit;
-      }
-
+        return h > 0x800000 ? h - 0x1000000 : h;
+      };
+      var writer = new Uint32Array(data.buffer);
       for (var i = 0; i < 0x10000; i++) {
-        if ((i & 0x3) !== 0) {
-          writer[i] = writer[i - 1];
-        } else if ((i & 0x300) !== 0) {
-          writer[i] = writer[i - 0x100];
+        if ((i & 0x0303) === 0) {
+          var c = ((z(i + 0x101) + z(i + 0x102) + z(i + 0x201) + z(i + 0x202)) >> 1) - ((
+            z(i + 1) + z(i + 2) + z(i + 0x301) + z(i + 0x302) +
+            z(i + 0x100) + z(i + 0x103) + z(i + 0x200) + z(i + 0x203)) >> 2);
+          c = (c >> (17 - zoom)) + 0x80;
+          writer[i] = (c < -0x100 || c > 0x200) ? 0 : pallet[c < 0 ? 0 : (c > 0xff ? 0xff : c)];
         } else {
-          var c =
-            (z[i + 0x101] + z[i + 0x102] + z[i + 0x201] + z[i + 0x202]) / 2 - (
-              z[i + 1] + z[i + 2] + z[i + 0x301] + z[i + 0x302] +
-              z[i + 0x100] + z[i + 0x103] + z[i + 0x200] + z[i + 0x203]) / 4;
-          if (!isNaN(c)) {
-            c = Math.max(-1, Math.min(1, c * 2));
-            writer[i] = pallet[Math.floor((pallet.length - 1) * (c + 1) / 2)];
-          } else {
-            writer[i] = 0;
-          }
+          writer[i] = writer[(i & 0x3) !== 0 ? i - 1 : i - 0x100];
         }
       }
     }
@@ -71,7 +62,7 @@
       maxNativeZoom: 16,
       maxZoom: 18,
       attribution: "傾斜量図",
-      className: "mix-blend-mode-multiply"
+      className: L.Browser.mobile ? "" : "mix-blend-mode-multiply"
     }).addTo(map);
     var curvature = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png?nocache", {
       minZoom: 2,
@@ -87,7 +78,7 @@
       var ctx = canvas.getContext("2d");
       ctx.drawImage(event.tile, 0, 0);
       var img = ctx.getImageData(0, 0, 0x100, 0x100);
-      transform(img.data, 10 * Math.pow(2, 14 - Math.min(14, event.coords.z)));
+      transform(img.data, Math.min(this.options.maxNativeZoom, event.coords.z));
       ctx.putImageData(img, 0, 0);
       event.tile.src = canvas.toDataURL();
       if (event.tile.parentNode && event.tile.parentNode.style.filter === "") {

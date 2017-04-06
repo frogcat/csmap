@@ -8,39 +8,93 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-hash/leaflet-hash.js"></script>
-  <style>
-    .mix-blend-mode-multiply {
-      mix-blend-mode: multiply;
-    }
-  </style>
+  <script>
+    // 取得した画像を Uint8Array に変換したものを transform で処理、その結果の画像を表示する
+    // サブクラスは transform メソッドをオーバーライドすることで任意のエフェクトを実装する
+    L.TileLayer.Transform = L.TileLayer.extend({
+      transform: function(data, coords) { /*do something you want*/ },
+      createTile: function(coords, done) {
+        var that = this;
+        var tile = document.createElement('img');
+        L.DomEvent.on(tile, 'load', L.Util.bind(this._tileOnLoad, this, done, tile));
+        L.DomEvent.on(tile, 'error', L.Util.bind(this._tileOnError, this, done, tile));
+        if (this.options.crossOrigin)
+          tile.crossOrigin = '';
+        tile.alt = '';
+        tile.setAttribute('role', 'presentation');
+        var size = L.GridLayer.prototype.getTileSize.call(this);
+        var img = new Image(size.x, size.y);
+        img.crossOrigin = "anonymous";
+        img.onload = function() {
+          var canvas = document.createElement("canvas");
+          canvas.width = size.x, canvas.height = size.y;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          var buf = ctx.getImageData(0, 0, size.x, size.y);
+          that.transform(buf.data, coords);
+          ctx.putImageData(buf, 0, 0);
+          tile.src = canvas.toDataURL();
+        };
+        img.src = this.getTileUrl(coords);
+        return tile;
+      }
+    });
+
+    var SlopeLayer = L.TileLayer.Transform.extend({
+      //  モノクロ不透明画像を黒色半透明(256階調)画像に変換する
+      transform: function(data, coords) {
+        var writer = new Uint32Array(data.buffer);
+        for (var i = 0; i < 0x10000; i++)
+          writer[i] = data[i * 4 + 3] === 0 ? 0 : ((0xff - data[i * 4]) << 24);
+      }
+    });
+
+    var CurvatureLayer = L.TileLayer.Transform.extend({
+      // 256階調のパレットを用意しておく
+      options: {
+        pallet: (function(cold, warm) {
+          var a = new Uint32Array(0x100);
+          for (var i = 0; i < 0x100; i++)
+            a[i] = i < 0x80 ? 0x02000000 * (0xff - i) + cold : 0x02000000 * (i - 0x80) + warm;
+          return a;
+        })(0x800020, 0x00a5ff)
+      },
+      // ズームレベルごとのコンテナに対して Filter Blur を適用する
+      _updateLevels: function() {
+        var level = L.TileLayer.Transform.prototype._updateLevels.call(this);
+        var blur = 3 * Math.pow(2, Math.max(0, level.zoom - this.options.maxNativeZoom));
+        level.el.style.filter = "blur(" + blur + "px)";
+        return level;
+      },
+      // DEM を Curvature に変換する
+      transform: function(data, coords) {
+        var pallet = this.options.pallet;
+        var zoom = Math.min(this.options.maxNativeZoom, coords.z);
+        var z = function(i) {
+          var h = (data[i * 4 + 0] << 16) + (data[i * 4 + 1] << 8) + data[i * 4 + 2];
+          return h > 0x800000 ? h - 0x1000000 : h;
+        };
+        var writer = new Uint32Array(data.buffer);
+        for (var i = 0; i < 0x10000; i++) {
+          if ((i & 0x0303) === 0) {
+            var c = ((z(i + 0x101) + z(i + 0x102) + z(i + 0x201) + z(i + 0x202)) >> 1) - ((
+              z(i + 1) + z(i + 2) + z(i + 0x301) + z(i + 0x302) +
+              z(i + 0x100) + z(i + 0x103) + z(i + 0x200) + z(i + 0x203)) >> 2);
+            c = (c >> (17 - zoom)) + 0x80;
+            writer[i] = (c < -0x100 || c > 0x200) ? 0 : pallet[c < 0 ? 0 : (c > 0xff ? 0xff : c)];
+          } else {
+            writer[i] = writer[(i & 0x3) !== 0 ? i - 1 : i - 0x100];
+          }
+        }
+      }
+    });
+  </script>
 </head>
 
 <body>
   <div id="map" style="position:absolute;top:0;left:0;right:0;bottom:0;"></div>
+
   <script>
-    var pallet = new Uint32Array(0x100);
-    for (var i = 0; i < 0x100; i++)
-      pallet[i] = i < 0x80 ? 0xff800020 - 0x02000000 * i : 0x00a5ff + 0x02000000 * (i - 0x80);
-
-    function transform(data, zoom) {
-      var z = function(i) {
-        var h = (data[i * 4 + 0] << 16) + (data[i * 4 + 1] << 8) + data[i * 4 + 2];
-        return h > 0x800000 ? h - 0x1000000 : h;
-      };
-      var writer = new Uint32Array(data.buffer);
-      for (var i = 0; i < 0x10000; i++) {
-        if ((i & 0x0303) === 0) {
-          var c = ((z(i + 0x101) + z(i + 0x102) + z(i + 0x201) + z(i + 0x202)) >> 1) - ((
-            z(i + 1) + z(i + 2) + z(i + 0x301) + z(i + 0x302) +
-            z(i + 0x100) + z(i + 0x103) + z(i + 0x200) + z(i + 0x203)) >> 2);
-          c = (c >> (17 - zoom)) + 0x80;
-          writer[i] = (c < -0x100 || c > 0x200) ? 0 : pallet[c < 0 ? 0 : (c > 0xff ? 0xff : c)];
-        } else {
-          writer[i] = writer[(i & 0x3) !== 0 ? i - 1 : i - 0x100];
-        }
-      }
-    }
-
     var map = L.map("map", L.extend({
       minZoom: 0,
       maxZoom: 18,
@@ -51,46 +105,27 @@
     map.zoomControl.setPosition("bottomright");
     map.attributionControl.addAttribution("<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>");
 
-    var pale = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
-      minZoom: 2,
-      maxNativeZoom: 16,
-      maxZoom: 18,
-      attribution: "淡色地図",
-    }).addTo(map);
-    var slope = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png", {
-      minZoom: 2,
-      maxNativeZoom: 16,
-      maxZoom: 18,
-      attribution: "傾斜量図",
-      className: L.Browser.mobile ? "" : "mix-blend-mode-multiply"
-    }).addTo(map);
-    var curvature = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png?nocache", {
-      minZoom: 2,
-      maxNativeZoom: 14,
-      maxZoom: 18,
-      crossOrigin: true,
-      attribution: "標高タイル"
-    }).on("tileload", function(event) {
-      if (event.tile.done) return;
-      event.tile.done = true;
-      var canvas = document.createElement("canvas");
-      canvas.width = 0x100, canvas.height = 0x100;
-      var ctx = canvas.getContext("2d");
-      ctx.drawImage(event.tile, 0, 0);
-      var img = ctx.getImageData(0, 0, 0x100, 0x100);
-      transform(img.data, Math.min(this.options.maxNativeZoom, event.coords.z));
-      ctx.putImageData(img, 0, 0);
-      event.tile.src = canvas.toDataURL();
-      if (event.tile.parentNode && event.tile.parentNode.style.filter === "") {
-        var blur = 3 * Math.pow(2, Math.max(0, event.coords.z - 14));
-        event.tile.parentNode.style.filter = "blur(" + blur + "px)";
-      }
-    }).addTo(map);
-
     L.control.layers({}, {
-      "淡色地図": pale,
-      "Slope": slope,
-      "Curvature": curvature
+      "淡色地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+        minZoom: 2,
+        maxNativeZoom: 16,
+        maxZoom: 18,
+        attribution: "淡色地図",
+      }).addTo(map),
+      "Slope": new SlopeLayer("https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png?nocache", {
+        minZoom: 2,
+        maxNativeZoom: 16,
+        maxZoom: 18,
+        attribution: "傾斜量図"
+      }).addTo(map),
+      "Curvature": new CurvatureLayer("https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png?nocache", {
+        minZoom: 2,
+        maxNativeZoom: 14,
+        maxZoom: 18,
+        attribution: "標高タイル"
+      }).addTo(map)
+    }, {
+      collapsed: false
     }).addTo(map);
   </script>
 </body>

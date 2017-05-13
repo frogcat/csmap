@@ -93,6 +93,48 @@
 
 <body>
   <div id="map" style="position:absolute;top:0;left:0;right:0;bottom:0;"></div>
+  <div style="position:absolute;top:10px;left:10px;z-index:10000;">
+    <select onchange="if(this.value.indexOf('#')===0)location.hash=this.value">
+      <option>--北海道地方--</option>
+      <option value="#15/43.384934/144.008102">雌阿寒岳</option>
+      <option value="#15/43.417954/142.686267">十勝岳</option>
+      <option value="#15/42.689092/141.378765">樽前山</option>
+      <option value="#15/42.540813/140.834556">有珠山</option>
+      <option value="#15/42.066053/140.685554">北海道駒ヶ岳</option>
+      <option value="#15/41.804686/141.166120">恵山</option>
+      <option>--東北地方--</option>
+      <option value="#15/40.655769/140.303006">岩木山</option>
+      <option value="#15/39.963800/140.757093">秋田焼山</option>
+      <option value="#15/39.850589/141.002741">岩手山</option>
+      <option value="#15/39.754383/140.799537">秋田駒ヶ岳</option>
+      <option value="#15/39.099393/140.048733">鳥海山</option>
+      <option value="#15/38.136346/140.449691">蔵王山</option>
+      <option value="#15/38.960877/140.788336">栗駒山</option>
+      <option value="#15/37.727925/140.249791">吾妻山</option>
+      <option value="#15/37.621064/140.288115">安達太良山</option>
+      <option value="#15/37.600938/140.072207">磐梯山</option>
+      <option>--関東・中部地方、伊豆・小笠原諸島--</option>
+      <option value="#15/37.124910/139.964662">那須岳</option>
+      <option value="#15/36.644905/138.543606">草津白根山</option>
+      <option value="#15/36.406985/138.520088">浅間山</option>
+      <option value="#15/36.226931/137.587066">焼岳</option>
+      <option value="#15/35.893048/137.480593">御嶽山</option>
+      <option value="#15/35.362771/138.730974">富士山</option>
+      <option value="#15/35.233421/139.020867">箱根山</option>
+      <option value="#15/34.904305/139.095669">伊豆東部火山群</option>
+      <option value="#15/34.726870/139.394531">伊豆大島</option>
+      <option value="#15/34.085898/139.526539">三宅島</option>
+      <option>--九州地方--</option>
+      <option value="#15/33.286557/131.429701">鶴見岳・伽藍岳</option>
+      <option value="#15/33.092404/131.263189">九重山</option>
+      <option value="#15/32.881678/131.083632">阿蘇山</option>
+      <option value="#15/32.760861/130.296392">雲仙岳</option>
+      <option value="#15/31.921024/130.876393">霧島山</option>
+      <option value="#15/31.584495/130.656838">桜島</option>
+      <option value="#15/30.790659/130.289483">薩摩硫黄島</option>
+      <option value="#15/29.642484/129.714718">諏訪之瀬島</option>
+    </select>
+  </div>
 
   <script>
     var map = L.map("map", L.extend({

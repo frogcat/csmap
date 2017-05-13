@@ -98,20 +98,31 @@
     var map = L.map("map", L.extend({
       minZoom: 0,
       maxZoom: 18,
-      zoom: 8,
-      center: [35.658342, 139.701462]
+      zoom: 15,
+      center: [31.9474, 130.8511]
     }, L.Hash.parseHash(location.hash)));
     L.hash(map);
     map.zoomControl.setPosition("bottomright");
     map.attributionControl.addAttribution("<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>");
 
-    L.control.layers({}, {
+    L.control.layers({
+      "火山基本図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/vbm/{z}/{x}/{y}.png", {
+        minZoom: 15,
+        maxZoom: 18,
+        attribution: "火山基本図"
+      }).addTo(map),
       "淡色地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
         minZoom: 2,
-        maxNativeZoom: 16,
         maxZoom: 18,
-        attribution: "淡色地図",
-      }).addTo(map),
+        attribution: "淡色地図"
+      }),
+      "白地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/blank/{z}/{x}/{y}.png", {
+        minZoom: 5,
+        maxNativeZoom: 14,
+        maxZoom: 18,
+        attribution: "白地図"
+      })
+    }, {
       "Slope": new SlopeLayer("https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png?nocache", {
         minZoom: 2,
         maxNativeZoom: 16,

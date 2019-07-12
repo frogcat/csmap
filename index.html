@@ -3,183 +3,205 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
-  <title>CSMap</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet-hash/leaflet-hash.js"></script>
+  <title>csmap</title>
+  <meta name="viewport" content="initial-scale=1.0, maximum-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.5.1/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.5.1/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
+  <script src="gl.js"></script>
   <script>
-    // 取得した画像を Uint8Array に変換したものを transform で処理、その結果の画像を表示する
-    // サブクラスは transform メソッドをオーバーライドすることで任意のエフェクトを実装する
-    L.TileLayer.Transform = L.TileLayer.extend({
-      transform: function(data, coords) { /*do something you want*/ },
-      createTile: function(coords, done) {
-        var that = this;
-        var tile = document.createElement('img');
-        L.DomEvent.on(tile, 'load', L.Util.bind(this._tileOnLoad, this, done, tile));
-        L.DomEvent.on(tile, 'error', L.Util.bind(this._tileOnError, this, done, tile));
-        if (this.options.crossOrigin)
-          tile.crossOrigin = '';
-        tile.alt = '';
-        tile.setAttribute('role', 'presentation');
-        var size = L.GridLayer.prototype.getTileSize.call(this);
-        var img = new Image(size.x, size.y);
-        img.crossOrigin = "anonymous";
-        img.onload = function() {
-          var canvas = document.createElement("canvas");
-          canvas.width = size.x, canvas.height = size.y;
-          var ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0);
-          var buf = ctx.getImageData(0, 0, size.x, size.y);
-          that.transform(buf.data, coords);
-          ctx.putImageData(buf, 0, 0);
-          tile.src = canvas.toDataURL();
-        };
-        img.src = this.getTileUrl(coords);
-        return tile;
-      }
-    });
+    var vertexShader = "attribute vec2 xy;void main(){gl_Position = vec4(xy,0,1);}";
 
-    var SlopeLayer = L.TileLayer.Transform.extend({
-      //  モノクロ不透明画像を黒色半透明(256階調)画像に変換する
-      transform: function(data, coords) {
-        var writer = new Uint32Array(data.buffer);
-        for (var i = 0; i < 0x10000; i++)
-          writer[i] = data[i * 4 + 3] === 0 ? 0 : ((0xff - data[i * 4]) << 24);
-      }
-    });
+    var fragmentShader =
+      `
+precision mediump float;
+uniform sampler2D fine;
+uniform sampler2D blur;
+uniform mat3 matrix;
+uniform float bias;
 
-    var CurvatureLayer = L.TileLayer.Transform.extend({
-      // 256階調のパレットを用意しておく
+const vec4 color_concave = vec4(0.08,0,0.25,1);
+const vec4 color_flat = vec4(1,1,1,0);
+const vec4 color_convex = vec4(0.6,0,0,1);
+const vec4 color_horizontal = vec4(0.90,0.85,0.80,1);
+const vec4 color_vertical = vec4(0.22,0.15,0.10,1);
+const vec4 rgba2alt = vec4(256.0 * 256.0 * 2.56, 256.0 * 2.56, 2.56, 0.0);
+
+vec4 b(int x,int y){
+  vec4 a = texture2D(blur, (matrix * (gl_FragCoord.xyw + vec3(x,y,0))).xy);
+  return a.r < 0.5 ? a : vec4(0);
+}
+
+vec4 f(int x,int y){
+  vec4 a = texture2D(fine, (matrix * (gl_FragCoord.xyw + vec3(x,y,0))).xy);
+  return a.r < 0.5 ? a : vec4(0);
+}
+
+vec4 main1() {
+  vec4 s = b(0,-1) + b(-1,0) + b(0,0) + b(1,0) + b(0,1);
+  float z = dot(s/s.a,rgba2alt);
+  return vec4(
+    floor(z / 256.0 / 256.0 / 0.01) / 256.0,
+    mod(floor(z / 256.0 / 0.01), 256.0) / 256.0,
+    mod(floor(z / 0.01), 256.0) / 256.0,
+    1.0
+  );
+}
+
+vec4 main2() {
+  vec4 sx = (f(1,-1) + f(1,0)*2.0 + f(1,1)) - (f(-1,-1) + f(-1,0)*2.0 + f(-1,1));
+  vec4 sy = (f(1,-1) + f(0,-1)*2.0 + f(-1,-1)) -  (f(1,1)+ f(0,1)*2.0 + f(-1,1));
+  float slope = sqrt(length(vec2(dot(sx * bias,rgba2alt),dot(sy * bias,rgba2alt))));
+  vec4 color1 = mix(color_horizontal,color_vertical,clamp(slope*0.25,0.0,1.0));
+
+  vec4 s = b(0,0) * 4.0 - b(-1,0) - b(1,0) - b(0,1) - b(0,-1);
+  float curvature = clamp(dot(s * bias,rgba2alt) * 5.0, -0.25, 0.25);
+  vec4 color2 = curvature < 0.0 ? color_concave : color_convex;
+  return color2 * abs(curvature) + color1 * (1.0 - abs(curvature));
+}
+
+void main() {
+  gl_FragColor = matrix[1][1] > 0.0 ? main1() : main2();
+}
+`;
+    var CSLayer = L.TileLayer.extend({
       options: {
-        pallet: (function(cold, warm) {
-          var a = new Uint32Array(0x100);
-          for (var i = 0; i < 0x100; i++)
-            a[i] = i < 0x80 ? 0x02000000 * (0xff - i) + cold : 0x02000000 * (i - 0x80) + warm;
-          return a;
-        })(0x800020, 0x00a5ff)
+        crossOrigin: true,
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader,
+        errorTileColor: "#7f0000"
       },
-      // ズームレベルごとのコンテナに対して Filter Blur を適用する
-      _updateLevels: function() {
-        var level = L.TileLayer.Transform.prototype._updateLevels.call(this);
-        var blur = 3 * Math.pow(2, Math.max(0, level.zoom - this.options.maxNativeZoom));
-        level.el.style.filter = "blur(" + blur + "px)";
-        return level;
+      _initContainer: function() {
+        L.TileLayer.prototype._initContainer.call(this);
+
+        var canvas = this._canvas = document.createElement('canvas');
+        canvas.style.zIndex = 10000;
+        canvas.style.position = "absolute";
+
+        this._gl = $gl(canvas.getContext('webgl'))
+          .shader(this.options.vertexShader)
+          .shader(this.options.fragmentShader);
+
       },
-      // DEM を Curvature に変換する
-      transform: function(data, coords) {
-        var pallet = this.options.pallet;
-        var zoom = Math.min(this.options.maxNativeZoom, coords.z);
-        var z = function(i) {
-          var h = (data[i * 4 + 0] << 16) + (data[i * 4 + 1] << 8) + data[i * 4 + 2];
-          return h > 0x800000 ? h - 0x1000000 : h;
-        };
-        var writer = new Uint32Array(data.buffer);
-        for (var i = 0; i < 0x10000; i++) {
-          if ((i & 0x0303) === 0) {
-            var c = ((z(i + 0x101) + z(i + 0x102) + z(i + 0x201) + z(i + 0x202)) >> 1) - ((
-              z(i + 1) + z(i + 2) + z(i + 0x301) + z(i + 0x302) +
-              z(i + 0x100) + z(i + 0x103) + z(i + 0x200) + z(i + 0x203)) >> 2);
-            c = (c >> (17 - zoom)) + 0x80;
-            writer[i] = (c < -0x100 || c > 0x200) ? 0 : pallet[c < 0 ? 0 : (c > 0xff ? 0xff : c)];
-          } else {
-            writer[i] = writer[(i & 0x3) !== 0 ? i - 1 : i - 0x100];
+      _onMoveEnd: function() {
+        L.TileLayer.prototype._onMoveEnd.call(this);
+        this.repaint(false);
+      },
+      _tileOnLoad: function(done, tile) {
+        L.TileLayer.prototype._tileOnLoad.call(this, done, tile);
+        tile.style.display = "none";
+        this.repaint(false);
+      },
+      repaint: function(immediate) {
+        L.Util.requestAnimFrame(this._doPaint, this, immediate);
+      },
+      _doPaint: function() {
+
+        if (!this._map) return;
+
+        var center = this._map.getCenter();
+        var pixelBounds = this._getTiledPixelBounds(center);
+        var tileRange = this._pxBoundsToTileRange(pixelBounds);
+        var size = tileRange.getSize().add([1, 1]).scaleBy(this.getTileSize());
+        var canvas = this._canvas;
+        var gl = this._gl;
+
+        if (canvas.width !== size.x || canvas.height !== size.y) {
+          canvas.width = size.x;
+          canvas.height = size.y;
+          canvas.style.width = size.x + "px";
+          canvas.style.height = size.y + "px";
+          gl.viewport(0, 0, size.x, size.y);
+        }
+
+        var shadow = document.createElement("canvas");
+        shadow.width = size.x;
+        shadow.height = size.y;
+
+        var context = shadow.getContext("2d");
+        context.fillStyle = this.options.errorTileColor;
+        context.fillRect(0, 0, size.x, size.y);
+        var origin = this._getTilePos(tileRange.min);
+        for (var key in this._tiles) {
+          var tile = this._tiles[key];
+          if (tile.current) {
+            var pos = this._getTilePos(tile.coords).subtract(origin);
+            try {
+              context.drawImage(tile.el, pos.x, pos.y);
+            } catch (ex) {}
           }
         }
+
+        this._level.el.appendChild(canvas);
+        L.DomUtil.setPosition(canvas, origin);
+
+        gl.texture(0, shadow)
+          .texture(1, shadow)
+          .texture(2, shadow)
+          .bind("xy", [-1, -1, 1, -1, -1, 1, 1, 1])
+          .bind("matrix", [1 / shadow.width, 0, 0, 0, 1 / shadow.height, 0, 0, 0, 0])
+          .bind("bias", 1 / Math.pow(2, 17 - this._tileZoom))
+          .bind("fine", 2);
+
+        var x = [0, 1];
+        for (var i = 0; i < 8; i++) {
+          x.push(x.shift());
+          gl.bind("blur", x[0]).triangleStrip(x[1]);
+        }
+        gl.bind("blur", x[1])
+          .bind("matrix", [1 / shadow.width, 0, 0, 0, -1 / shadow.height, 0, 0, 1, 0])
+          .triangleStrip();
+
       }
     });
   </script>
+
 </head>
 
 <body>
   <div id="map" style="position:absolute;top:0;left:0;right:0;bottom:0;"></div>
-  <div style="position:absolute;top:10px;left:10px;z-index:10000;">
-    <select onchange="if(this.value.indexOf('#')===0)location.hash=this.value">
-      <option>--北海道地方--</option>
-      <option value="#15/43.384934/144.008102">雌阿寒岳</option>
-      <option value="#15/43.417954/142.686267">十勝岳</option>
-      <option value="#15/42.689092/141.378765">樽前山</option>
-      <option value="#15/42.540813/140.834556">有珠山</option>
-      <option value="#15/42.066053/140.685554">北海道駒ヶ岳</option>
-      <option value="#15/41.804686/141.166120">恵山</option>
-      <option>--東北地方--</option>
-      <option value="#15/40.655769/140.303006">岩木山</option>
-      <option value="#15/39.963800/140.757093">秋田焼山</option>
-      <option value="#15/39.850589/141.002741">岩手山</option>
-      <option value="#15/39.754383/140.799537">秋田駒ヶ岳</option>
-      <option value="#15/39.099393/140.048733">鳥海山</option>
-      <option value="#15/38.136346/140.449691">蔵王山</option>
-      <option value="#15/38.960877/140.788336">栗駒山</option>
-      <option value="#15/37.727925/140.249791">吾妻山</option>
-      <option value="#15/37.621064/140.288115">安達太良山</option>
-      <option value="#15/37.600938/140.072207">磐梯山</option>
-      <option>--関東・中部地方、伊豆・小笠原諸島--</option>
-      <option value="#15/37.124910/139.964662">那須岳</option>
-      <option value="#15/36.644905/138.543606">草津白根山</option>
-      <option value="#15/36.406985/138.520088">浅間山</option>
-      <option value="#15/36.226931/137.587066">焼岳</option>
-      <option value="#15/35.893048/137.480593">御嶽山</option>
-      <option value="#15/35.362771/138.730974">富士山</option>
-      <option value="#15/35.233421/139.020867">箱根山</option>
-      <option value="#15/34.904305/139.095669">伊豆東部火山群</option>
-      <option value="#15/34.726870/139.394531">伊豆大島</option>
-      <option value="#15/34.085898/139.526539">三宅島</option>
-      <option>--九州地方--</option>
-      <option value="#15/33.286557/131.429701">鶴見岳・伽藍岳</option>
-      <option value="#15/33.092404/131.263189">九重山</option>
-      <option value="#15/32.881678/131.083632">阿蘇山</option>
-      <option value="#15/32.760861/130.296392">雲仙岳</option>
-      <option value="#15/31.921024/130.876393">霧島山</option>
-      <option value="#15/31.584495/130.656838">桜島</option>
-      <option value="#15/30.790659/130.289483">薩摩硫黄島</option>
-      <option value="#15/29.642484/129.714718">諏訪之瀬島</option>
-    </select>
-  </div>
-
   <script>
-    var map = L.map("map", L.extend({
-      minZoom: 0,
-      maxZoom: 18,
-      zoom: 15,
-      center: [31.9474, 130.8511]
-    }, L.Hash.parseHash(location.hash)));
-    L.hash(map);
-    map.zoomControl.setPosition("bottomright");
-    map.attributionControl.addAttribution("<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>");
+    new Promise(function(resolve) {
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        var context = canvas.getContext("2d");
+        context.drawImage(img, 0, 0);
+        var tokens = img.src.replace(/^.*\//, "").split(/[\-\.]/);
+        var ox = parseInt(tokens[1]);
+        var oy = parseInt(tokens[2]);
+        resolve(function(coords) {
+          if (coords.z < 9) return "demgm_png";
+          if (coords.z < 15) return "dem_png";
+          var rgba = context.getImageData(coords.x - ox, coords.y - oy, 1, 1).data;
+          if (rgba[0]) return "dem5a_png";
+          if (rgba[1]) return "dem5b_png";
+          return "pale";
+        });
+      };
+      img.crossOrigin = "Anonymous";
+      img.src = "dem15-27677-11757.png";
+    }).then(function(chooser) {
 
-    L.control.layers({
-      "火山基本図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/vbm/{z}/{x}/{y}.png", {
-        minZoom: 15,
+      var map = L.map("map", L.extend({
+        zoom: 15,
+        center: [36.0466, 138.1293]
+      }, L.Hash.parseHash(location.hash)));
+      L.hash(map);
+      map.zoomControl.setPosition("bottomright");
+      L.control.scale({
+        imperial: false
+      }).addTo(map);
+      (new CSLayer("https://cyberjapandata.gsi.go.jp/xyz/{id}/{z}/{x}/{y}.png", {
+        attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>",
         maxZoom: 18,
-        attribution: "火山基本図"
-      }).addTo(map),
-      "淡色地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
-        minZoom: 2,
-        maxZoom: 18,
-        attribution: "淡色地図"
-      }),
-      "白地図": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/blank/{z}/{x}/{y}.png", {
-        minZoom: 5,
-        maxNativeZoom: 14,
-        maxZoom: 18,
-        attribution: "白地図"
-      })
-    }, {
-      "Slope": new SlopeLayer("https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png?nocache", {
-        minZoom: 2,
-        maxNativeZoom: 16,
-        maxZoom: 18,
-        attribution: "傾斜量図"
-      }).addTo(map),
-      "Curvature": new CurvatureLayer("https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png?nocache", {
-        minZoom: 2,
-        maxNativeZoom: 14,
-        maxZoom: 18,
-        attribution: "標高タイル"
-      }).addTo(map)
-    }, {
-      collapsed: false
-    }).addTo(map);
+        maxNativeZoom: 15,
+        id: chooser
+      })).addTo(map);
+
+    });
   </script>
 </body>
 
